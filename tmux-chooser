@@ -1,0 +1,390 @@
+#!/usr/bin/env python
+
+import paramiko
+import subprocess
+import multiprocessing
+import os
+import pwd
+import time
+import ctypes
+import curses
+
+
+# This can be overridden by the ~/.tmux_chooser JSON file
+SERVERS = ["localhost"]
+USER = pwd.getpwuid(os.getuid()).pw_name
+
+
+# Transactor class to add/del/update session info
+class TmuxSession:
+    def __init__(self, host, sessName, status):
+        self.host = host
+        self.sessName = sessName
+        self.status = status  # Enum: 'attached','detached','killed'
+
+    def __str__(self):
+        return "%s:%s (%s)" % (self.host, self.sessName, self.status)
+
+
+class TmuxMonitor:
+    def __init__(self, host, user, sessions):
+        self.host = host
+        self.user = user
+        self.connected = False
+        self.sessions = sessions
+        self.process = None
+        self.stop_req = False
+
+    def connect(self):
+        if self.connected:
+            return  # NOP
+        else:
+            self.ssh = paramiko.SSHClient()
+            self.ssh.load_system_host_keys()
+            try:
+                self.ssh.connect(self.host, username=self.user,
+                                 allow_agent=True, look_for_keys=True)
+                self.connected = True
+            except Exception:
+                self.sessions[""] = TmuxSession(self.host, "",
+                                                "could not connect")
+
+    def disconnect(self):
+        if not self.connected:
+            return  # NOP
+        else:
+            self.ssh.close()
+            self.connected = False
+
+    def update(self):
+        if not self.connected:
+            self.connect()
+        if not self.connected:
+            return
+        ssh_stdin, ssh_stdout, ssh_stderr = \
+            self.ssh.exec_command('tmux list-sessions')
+        statusLines = ssh_stdout.readlines()
+        sessNames = []
+        for l in statusLines:
+            sessName = l.split(':')[0]
+            sessNames.append(sessName)
+        for sn in self.sessions.keys():
+            if sn not in sessNames:  # it got killed
+                killedSess = self.sessions[sn]
+                killedSess.status = 'killed'
+                del self.sessions[sn]
+        for l in statusLines:
+            sn = l.split(':')[0]
+            if 'attached' in l:
+                status = 'attached'
+            else:
+                status = 'detached'
+            if sn not in self.sessions.keys():  # Newly created
+                newSess = TmuxSession(self.host, sn, status)
+                self.sessions[sn] = newSess
+            else:
+                if status != self.sessions[sn].status:
+                    self.sessions[sn].status = status
+
+    def main_loop(self, refresh_rate=1.0):
+        self.connect()
+        timer = 0
+        while not self.stop_req.value:
+            if timer == 0:
+                self.update()
+                timer = int(float(refresh_rate)/0.1)
+            else:
+                time.sleep(0.1)
+                timer -= 1
+        self.disconnect()
+
+    def start(self, refresh_rate=1.0):
+        self.stop_req = multiprocessing.Value(ctypes.c_bool, False)
+        self.process = multiprocessing.Process(target=self.main_loop,
+                                               args=(refresh_rate,))
+        self.process.start()
+
+    def stop(self):
+        if self.process is not None:
+            self.sessions = {}
+            self.stop_req.value = True
+            self.process.join()  # block until main loop finished
+            self.process = None
+
+
+class TmuxChooser:
+
+    def __init__(self, servers, user, refresh_rate=1.0):
+        self.servers = servers
+        self.user = user
+        self.refresh_rate = refresh_rate
+        self.status_stop_req = False
+        self.status_process = None
+        self.mgr = multiprocessing.Manager()
+        self.sessions = {}
+        for s in servers:
+            self.sessions[s] = {}
+
+    def start_monitors(self):
+        # Create a monitor for each server
+        self.monitors = []
+        for s in self.servers:
+            self.sessions[s] = self.mgr.dict()
+            self.monitors.append(TmuxMonitor(s, self.user, self.sessions[s]))
+        # Now start the monitors
+        for m in self.monitors:
+            m.start(refresh_rate=self.refresh_rate)
+
+    def stop_monitors(self):
+        for m in self.monitors:
+            m.stop()
+
+    def get_sessions(self):
+        # Get a local copy of the dicts. Not very good for large data sets,
+        # but these are expected to stay small
+        sessions = {}
+        for s in chooser.sessions.keys():
+            sessions[s] = chooser.sessions[s]._getvalue()
+        return sessions
+
+    def get_sessions_for(self, server):
+        # Get a local copy of the dicts. Not very good for large data sets,
+        # but these are expected to stay small
+        if server not in self.servers:
+            return {}
+        sessions = self.get_sessions()
+        return sessions[server]
+
+
+def runmenu(stdscr, chooser):
+    resize = True
+    # Change this to use different colors when highlighting
+    pos = [0, 0]
+    stdscr.timeout(100)
+    stdscr.keypad(True)
+    stdscr.leaveok(1)
+    prev_sessions = {}
+    for server in chooser.servers:
+        prev_sessions[server] = {}
+
+    # Loop until we can return something
+    while True:
+        if resize:
+            resize = False
+            stdscr.clear()
+            # Create subwindows per server
+            windows = {}
+            offset = 2
+            h, w = stdscr.getmaxyx()
+            width = (w-4)/len(chooser.servers)
+            height = min(20, h-4)
+            for server in chooser.servers:
+                windows[server] = curses.newwin(height, width, 2, offset)
+                windows[server].timeout(100)
+                windows[server].keypad(True)
+                windows[server].clear()
+                windows[server].leaveok(1)
+                offset += width
+                online_help = "q: quit - c: new session - k: kill session"
+            stdscr.addstr(h-2, (w/2)-len(online_help)/2, online_help,
+                          curses.A_DIM)
+        currentWin = windows[chooser.servers[pos[0]]]
+        stdscr.border()
+        stdscr.refresh()
+        # Create a window per server
+        for server in chooser.servers:
+            sessions = chooser.get_sessions_for(server)
+            if len(prev_sessions[server].keys()) > len(sessions.keys()):
+                # sessions got killed:
+                # redraw entire list so that old sessions do not stay on screen
+                windows[server].clear()
+            windows[server].border()
+            if windows[server] == currentWin:
+                # Title for this menu is highlighted
+                windows[server].addnstr(0, 1, server, width-2,
+                                        curses.A_REVERSE)
+            else:
+                # Title for this menu
+                windows[server].addnstr(0, 1, server, width-2,
+                                        curses.A_BOLD)
+            offset += width
+            windows[server].refresh()
+            i = 0
+            for sess in sorted(sessions.keys()):
+                if windows[server] == currentWin and pos[1] == i:
+                    style = curses.A_STANDOUT
+                else:
+                    style = curses.A_NORMAL
+                h, w = windows[server].getmaxyx()
+                if 2+i < h-1:
+                    windows[server].addnstr(2+i, 2, "%s (%s)" %
+                                            (sessions[sess].sessName,
+                                             sessions[sess].status),
+                                            width-4,
+                                            style)
+                i += 1
+            windows[server].refresh()
+            prev_sessions[server] = sessions
+
+        # Poll for key
+        x = currentWin.getch()
+
+        # NOTE: curses.KEY_* does not work unless you did scr.keypad(True)
+        # Take action based on key pressed
+        if x == -1:  # timeout
+            continue
+        if x == curses.KEY_RESIZE:
+            resize = True
+        elif x in [ord('q'), ord('Q')]:
+            return ("quit", None)
+        elif x in [ord('c'), ord('C')]:
+            return ("create", chooser.servers[pos[0]])
+        elif x in [ord('k'), ord('K')]:
+            i = 0
+            sessions = chooser.get_sessions_for(chooser.servers[pos[0]])
+            for sess in sorted(sessions.keys()):
+                if i == pos[1]:
+                    kill(sessions[sess])
+                    break
+                i += 1
+            continue
+        elif x in [ord('\n')]:
+            i = 0
+            sessions = chooser.get_sessions_for(chooser.servers[pos[0]])
+            for sess in sorted(sessions.keys()):
+                if i == pos[1]:
+                    return ("attach", sessions[sess])
+                i += 1
+        elif x == curses.KEY_LEFT:
+            if pos[0] > 0:
+                pos[0] -= 1
+                nsessions = \
+                    len(chooser.get_sessions_for(chooser.servers[pos[0]]))
+                if nsessions > 0:
+                    if nsessions-1 < pos[1]:
+                        pos[1] = nsessions - 1
+                else:
+                    pos[1] = 0
+            else:
+                curses.flash()
+        elif x == curses.KEY_RIGHT:
+            if pos[0] < len(chooser.servers)-1:
+                pos[0] += 1
+                nsessions = \
+                    len(chooser.get_sessions_for(chooser.servers[pos[0]]))
+                if nsessions > 0:
+                    if nsessions-1 < pos[1]:
+                        pos[1] = nsessions-1
+                else:
+                    pos[1] = 0
+            else:
+                curses.flash()
+        elif x == curses.KEY_UP:
+            if pos[1] > 0:
+                pos[1] -= 1
+            else:
+                curses.flash()
+        elif x == curses.KEY_DOWN:
+            nsessions = \
+                len(chooser.get_sessions_for(chooser.servers[pos[0]]))
+            if pos[1] < nsessions-1:
+                pos[1] += 1
+            else:
+                curses.flash()
+
+
+def attach(session):
+    print "Attaching to", session
+    subprocess.call("ssh -qt %s tmux attach -t %s" % (session.host,
+                                                      session.sessName),
+                    shell=True)
+
+
+def kill(session):
+    print "Killing ", session
+    subprocess.call("ssh -qt %s tmux kill-session -t %s" % (session.host,
+                                                            session.sessName),
+                    shell=True)
+
+
+def create(server):
+    print "Creating a new session on", server
+    subprocess.call("ssh -qt %s tmux new-session" % server, shell=True)
+
+
+def choose_and_act(chooser):
+    chooser.start_monitors()
+    action = curses.wrapper(runmenu, chooser)
+    chooser.stop_monitors()
+    if action[0] == "exit":
+        sys.exit(0)
+    elif action[0] == "attach":
+        attach(action[1])
+    elif action[0] == "create":
+        create(action[1])
+
+
+def warn_inside_tmux(stdscr):
+    message_1 = "       Warning: you should not run"
+    message_2 = "tmux_chooser inside a tmux session."
+    resize = True
+    stdscr.leaveok(1)
+    stdscr.timeout(-1)
+    stdscr.keypad(True)
+    while True:
+        if resize:
+            resize = False
+            stdscr.clear()
+            stdscr.border()
+            h, w = stdscr.getmaxyx()
+            width = min(39, w-4)
+            height = min(7, h-4)
+            win = curses.newwin(height, width, (h-height)/2, (w-width)/2)
+            win.clear()
+            win.leaveok(1)
+            win.border()
+            win.keypad(True)
+            win.addstr(2, (width/2)-35/2, message_1, curses.A_BOLD)
+            win.addstr(3, (width/2)-35/2, message_2, curses.A_BOLD)
+            win.addstr(5, (width/2)-5/2, "Quit", curses.A_REVERSE)
+            stdscr.refresh()
+            win.refresh()
+        x = win.getch()
+        if x in [ord('q'), ord('Q'), ord('\n')]:
+            return
+        if x == curses.KEY_RESIZE:
+            resize = True
+        else:  # flash window
+            win.bkgd(curses.A_REVERSE)
+            win.refresh()
+            time.sleep(0.05)
+            win.bkgd(curses.A_NORMAL)
+            win.addstr(5, (width/2)-5/2, "Quit", curses.A_REVERSE)
+            win.refresh()
+
+if __name__ == "__main__":
+    if "TMUX" in os.environ.keys():
+        import sys
+        curses.wrapper(warn_inside_tmux)
+        sys.exit(0)
+
+    # Load settings from config
+    servers = sorted(list(set(SERVERS)))
+    user = USER
+    try:
+        json_data = open(os.path.join(os.environ['HOME'], ".tmux_chooser"))
+        import json
+        data = json.load(json_data)
+        servers = sorted(list(set(data['servers'])))
+        if "ssh_log" in data.keys():
+            if data["ssh_log"]:
+                paramiko.util.log_to_file("/tmp/paramiko.%d.log" % os.getpid())
+        if "user" in data.keys():
+            user = data['user']
+    except IOError:
+        # We take default values, and log ssh
+        paramiko.util.log_to_file("/tmp/paramiko.%d.log" % os.getpid())
+
+    # Main task: connect tmux monitors and start chooser menu
+    chooser = TmuxChooser(servers, user, refresh_rate=1.0)
+    choose_and_act(chooser)

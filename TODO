@@ -1,0 +1,12 @@
+* Docs
+  * Add README and screenshot
+  * Add example config file
+
+* PyPI support
+ * define requirements
+ * add setup scripts
+
+* Tests?
+
+* Rewrite the async session checking
+  * Maybe use something like twisted or fancy new python3 features?
