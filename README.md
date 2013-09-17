@@ -1,5 +1,7 @@
-Session chooser for tmux
-========================
+tmux-chooser
+============
+
+Session chooser for busy people with lots of tmux sessions everywhere
 
 Screenshot
 ----------
@@ -10,4 +12,3 @@ Dependencies
 ------------
 
 TODO
-
