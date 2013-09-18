@@ -44,8 +44,8 @@ You can use the following keys:
 The most likely source of problems are ssh connection issues. Make sure that:
  1. The serves you are connected to are in your `~/.ssh/known_hosts` file
  2. You can access the servers without a password, using ssh keys (this avoids
-    the need for `tmux-chooser` to prompt or remember passwords and all related
-    potential security problems)
+    the need for `tmux-chooser` to prompt for or remember passwords and all
+    related potential security problems)
 
 Check the paramiko logs in `/tmp/paramiko.<PID>.log` to get a clue of what
 might be the problem.
@@ -61,4 +61,4 @@ TODO: more words
 Found bugs?
 -----------
 
-File report in the [issue tracker](https://github.com/peter-d/tmux-chooser/issues).
+Report them in the [issue tracker](https://github.com/peter-d/tmux-chooser/issues).
