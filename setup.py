@@ -43,7 +43,7 @@ setup(
     author='Peter Debacker',
     author_email='peter@peterdebacker.com',
     url='https://github.com/peter-d/tmux-chooser',
-    download_url='https://github.com/peter-d/tmux-chooser/tarball/0.1',
+    download_url='https://github.com/peter-d/tmux-chooser/tarball/%s.tar.gz' % get_version(),
     license='MIT',
     long_description=open(os.path.join(here, "README.md")).read(),
     **setup_params
