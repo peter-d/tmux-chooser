@@ -1,11 +1,7 @@
 * Docs
-  * Add README and screenshot
-  * Add example config file
+  * Add screenshot to README
 
-* PyPI support
- * define requirements
- * add setup scripts
-
+* Config file: more flexible: different user per server?
 * Tests?
 
 * Rewrite the async session checking

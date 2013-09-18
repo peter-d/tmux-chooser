@@ -1,0 +1,8 @@
+# Edit this file to customize the server list other settings
+# Copy it to ~/.tmux-chooser
+
+{
+  "servers": ["server1", "server2", "server3", "server4"],
+  "ssh_log": 0,
+  "user": yourusername # defaults to your account name
+}

@@ -17,10 +17,12 @@ Paramiko module for the ssh communication.
 Installation
 ------------
 
-TODO: update this once PyPI support is there.
-
-For now, just make sure you have python and paramiko installed and then put
-tmux-chooser in your path.
+ 1. Download the source code:
+    a. Using git to check out the head of the repository:
+       `git clone https://github.com/peter-d/tmux-chooser.git`
+    b. Download the tarball for a specific version:r
+       `wget -O - https://github.c m/peter-d/tmux-chooser/tarball/<version> | tar -xvz`
+ 2. Run `python setup.py install`
 
 Using it
 --------
