@@ -10,7 +10,7 @@ import ctypes
 import curses
 
 
-# This can be overridden by the ~/.tmux_chooser JSON file
+# This can be overridden by the ~/.tmux-chooser JSON file
 SERVERS = ["localhost"]
 USER = pwd.getpwuid(os.getuid()).pw_name
 
@@ -372,7 +372,7 @@ if __name__ == "__main__":
     servers = sorted(list(set(SERVERS)))
     user = USER
     try:
-        json_data = open(os.path.join(os.environ['HOME'], ".tmux_chooser"))
+        json_data = open(os.path.join(os.environ['HOME'], ".tmux-chooser"))
         import json
         data = json.load(json_data)
         servers = sorted(list(set(data['servers'])))
