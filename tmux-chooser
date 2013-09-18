@@ -9,6 +9,7 @@ import time
 import ctypes
 import curses
 
+__version__ = "0.1"
 
 # This can be overridden by the ~/.tmux-chooser JSON file
 SERVERS = ["localhost"]
