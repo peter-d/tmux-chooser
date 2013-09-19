@@ -17,10 +17,10 @@ Paramiko module for the ssh communication.
 Installation
 ------------
 
- 1. Download the source code:
-    a. Using git to check out the head of the repository:
+ 1. Download the source code, either:
+    * Using git to check out the head of the repository:
        `git clone https://github.com/peter-d/tmux-chooser.git`
-    b. Download the tarball for a specific version:r
+    * Download the tarball for a specific version:r
        `wget -O - https://github.c m/peter-d/tmux-chooser/tarball/<version>.tar.gz | tar -xvz`
  2. Run `python setup.py install`
 
